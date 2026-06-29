@@ -1,96 +1,76 @@
 import numpy as np
-import tensorflow as tf
-from collections import Counter
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import SimpleRNN, Dense
+from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Embedding, SimpleRNN, Dense
 
-# ==========================================
-# 1. 文本数据预处理
-# ==========================================
-docs = ['this, is', 'is an']
-labels = ['an', 'example']
+# ================= 1. 准备更复杂的文本数据集（情感二分类） =================
+docs = [
+    # 正面评论 (Label: 1)
+    "this movie is great",
+    "i love this film",
+    "it was an amazing experience",
+    "highly recommended for everyone",
+    "absolutely beautiful and wonderful",
+    "one of the best movies ever",
+    "i really liked the acting",
+    # 负面评论 (Label: 0)
+    "this movie is terrible",
+    "i hate this film",
+    "it was a waste of time",
+    "very boring and too long",
+    "the acting was extremely bad",
+    "worst experience ever",
+    "i do not recommend this movie"
+]
+labels = np.array([1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
 
-# 构建词频字典
-counts = Counter()
-for i, review in enumerate(docs + labels):
-    counts.update(review.split())
+# ================= 2. 文本分词与序列填充 =================
+# 初始化分词器并构建词表
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(docs)
+sequences = tokenizer.texts_to_sequences(docs)
 
-# 按照词频排序构建词汇表（从 1 开始编码）
-words = sorted(counts, key=counts.get, reverse=True)
-word_to_int = {word: i for i, word in enumerate(words, 1)}
-print("【词汇映射表】:", word_to_int)
+# 词汇表大小（加 1 是因为索引 0 预留给 padding）
+vocab_size = len(tokenizer.word_index) + 1
+print(f"【构建成功】词汇表大小为: {vocab_size}")
 
-# 将文本转换为整数序列
-encoded_docs = [[word_to_int[word] for word in doc.split()] for doc in docs]
-encoded_labels = [[word_to_int[word] for word in label.split()] for label in labels]
-print('【编码后的文档】: ', encoded_docs)
-print('【编码后的标签】: ', encoded_labels)
+# 固定句长为 5 词，超出的截断，不足的在后方填充 (padding='post')
+max_length = 5
+padded_docs = pad_sequences(sequences, maxlen=max_length, padding='post')
+print("编码并对齐后的特征矩阵形状:", padded_docs.shape) # 形状为 (14, 5)
 
-# 填充序列（设置最大长度为 2）
-max_length = 2
-padded_docs = pad_sequences(encoded_docs, maxlen=max_length, padding='pre')
+# ================= 3. 构建升级版的 RNN 模型 =================
+model = Sequential()
 
-# 标签独热编码（One-Hot Encoding），总共 5 个类别（0 到 4）
-one_hot_encoded_labels = to_categorical(encoded_labels, num_classes=5)
+# 1. 词嵌入层：把单词索引转化为 8 维的稠密向量
+model.add(Embedding(input_dim=vocab_size, output_dim=8, input_length=max_length))
 
-# 将输入特征重塑为 RNN 需要的格式: (样本数, 时间步, 特征数)
-padded_docs = padded_docs.reshape(2, max_length, 1)
+# 2. 循环层：使用 16 个隐藏神经元的 SimpleRNN，具备更强的特征捕捉能力
+model.add(SimpleRNN(16, activation='tanh', return_sequences=False))
 
-# ==========================================
-# 2. 构建与训练 RNN 模型
-# ==========================================
-embed_length = 1
+# 3. 输出层：二分类任务，使用 Sigmoid 激活函数，输出 0~1 之间的概率值
+model.add(Dense(1, activation='sigmoid'))
 
-model = Sequential([
-    # SimpleRNN 层：1个神经元，tanh 激活函数，unroll=True 展开计算
-    SimpleRNN(1, activation='tanh', return_sequences=False, input_shape=(max_length, embed_length), unroll=True),
-    # 全连接层：5个神经元，对应 5 个分类的概率
-    Dense(5, activation='softmax')
-])
-
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['acc'])
-print("\n--- 模型结构摘要 ---")
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 model.summary()
 
-print("\n--- 开始模型训练 ---")
-model.fit(padded_docs, np.array(one_hot_encoded_labels), epochs=100, verbose=0) # 隐藏繁琐的训练日志
-print("训练完成！")
+# ================= 4. 增加 Epoch 轮数进行训练 =================
+print("\n开始训练...")
+history = model.fit(padded_docs, labels, epochs=50, verbose=1)
 
-# ==========================================
-# 3. 模型预测与底层数学原理手动验证
-# ==========================================
-print("\n--- 预测与数学验证 ---")
-# Keras 模型的原生预测结果
-keras_prediction = model.predict(padded_docs[0].reshape(1, max_length, 1), verbose=0)
-print("【Keras 模型预测结果】:\n", keras_prediction)
+# ================= 5. 测试模型在未见样本上的泛化能力 =================
+print("\n--- 模型测试 ---")
+test_docs = [
+    "i love this movie",       # 预期输出接近 1 (正面)
+    "this film is terrible"    # 预期输出接近 0 (负面)
+]
+# 用相同的 tokenizer 进行编码和填充
+test_sequences = tokenizer.texts_to_sequences(test_docs)
+test_padded = pad_sequences(test_sequences, maxlen=max_length, padding='post')
 
-# 获取模型训练后的权重参数
-weights = model.get_weights()
-W_x = weights[0]  # 输入到隐藏层的权重
-W_h = weights[1]  # 循环隐藏层之间的权重
-b_h = weights[2]  # 隐藏层偏置
-W_d = weights[3]  # 全连接层的权重
-b_d = weights[4]  # 全连接层偏置
+predictions = model.predict(test_padded)
 
-# 提取第一个文档的数据
-doc_0 = padded_docs[0]
-
-# 时间步 t=0 的计算
-input_t0 = doc_0[0]
-input_t0_kernel_bias = input_t0 * W_x + b_h
-hidden_layer0_value = np.tanh(input_t0_kernel_bias)
-
-# 时间步 t=1 的计算
-input_t1 = doc_0[1]
-input_t1_kernel_bias = input_t1 * W_x + b_h
-input_t1_recurrent = hidden_layer0_value * W_h
-total_input_t1 = input_t1_kernel_bias + input_t1_recurrent
-output_t1 = np.tanh(total_input_t1)
-
-# 全连接层与 Softmax 映射
-final_output = output_t1 * W_d + b_d
-manual_prediction = np.exp(final_output) / np.sum(np.exp(final_output))
-
-print("【手动数学推演结果】:\n", manual_prediction)
+for doc, pred in zip(test_docs, predictions):
+    sentiment = '正面' if pred[0] > 0.5 else '负面'
+    print(f"文本: '{doc}' -> 预测正面概率: {pred[0]:.4f} (分类结果: {sentiment})")

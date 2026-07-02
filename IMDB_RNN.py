@@ -14,20 +14,16 @@ from keras.layers import Embedding, GRU, Dense, Dropout, SpatialDropout1D
 from keras.preprocessing.sequence import pad_sequences
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
-
-
 # =====================================================
 # 0. 固定随机种子：尽量保证每次运行结果可复现
 # =====================================================
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-tf.random.set_seed(SEED)
-
-# 可选：进一步提高可复现性
-os.environ["PYTHONHASHSEED"] = str(SEED)
-
-
+# SEED = 42
+# random.seed(SEED)
+# np.random.seed(SEED)
+# tf.random.set_seed(SEED)
+#
+# # 可选：进一步提高可复现性
+# os.environ["PYTHONHASHSEED"] = str(SEED)
 
 # =====================================================
 # 1. 参数配置
@@ -43,7 +39,6 @@ EPOCHS = 10              # 设置大一点，交给 EarlyStopping 自动停止
 # 2. 加载并预处理 IMDB 数据集
 # =====================================================
 
-
 print("正在加载 IMDB 文本数据集...")
 
 from keras.layers import Input
@@ -57,7 +52,6 @@ model = Sequential([
     Dense(1, activation="sigmoid")
 ])
 
-
 (x_train, y_train), (x_test, y_test) = imdb.load_data(num_words=MAX_FEATURES)
 
 # 将不同长度的评论统一处理成固定长度
@@ -67,35 +61,34 @@ x_test = pad_sequences(x_test, maxlen=MAX_LEN, padding="post", truncating="post"
 print("训练集形状:", x_train.shape)
 print("测试集形状:", x_test.shape)
 
-
 # =====================================================
 # 3. 构建模型
-#    GRU 比 SimpleRNN 更适合处理较长文本序列
+#    GRU 比 SimpleRNN 更适合处理较长文本序列,能缓解普通 RNN 容易遗忘前文信息的问题。
 # =====================================================
+#模型主要包括五层：
 model = Sequential([
-    # 将整数词 ID 映射为稠密词向量
+    # Embedding层:把 IMDB 中的词编号转成 64 维向量
     Embedding(
         input_dim=MAX_FEATURES,
         output_dim=EMBED_DIM,
     ),
 
-    # 对词向量做整体 dropout，减少模型依赖某些特定词
+    # SpatialDropout1D:随机丢弃部分词向量特征，减少模型过度依赖某些词。
     SpatialDropout1D(0.25),
 
-    # GRU 层：比 SimpleRNN 更能捕捉长距离上下文信息
+    # GRU 层：比 SimpleRNN 更能捕捉长距离上下文信息,用于学习评论文本中的上下文关系
     GRU(
         units=64,
         dropout=0.3,
         recurrent_dropout=0.2
     ),
 
-    # 全连接前再做 dropout，进一步缓解过拟合
+    #  Dropout层:全连接前再做 dropout，进一步缓解过拟合
     Dropout(0.4),
 
-    # 二分类输出层，sigmoid 输出正面评论概率
+    # 二分类输出层，使用 sigmoid 输出一个 0 到 1 之间的概率，接近 1 表示正面评论，接近 0 表示负面评论。
     Dense(1, activation="sigmoid")
 ])
-
 
 # =====================================================
 # 4. 编译模型
@@ -110,7 +103,6 @@ model.compile(
 
 print("\n--- 模型结构摘要 ---")
 model.summary()
-
 
 # =====================================================
 # 5. 回调函数：防止过拟合
@@ -148,7 +140,6 @@ history = model.fit(
     verbose=1
 )
 
-
 # =====================================================
 # 7. 在测试集上评估最终模型
 # =====================================================
@@ -158,7 +149,6 @@ print("\n" + "=" * 45)
 print(f"测试集 Loss: {test_loss:.4f}")
 print(f"测试集 Accuracy: {test_acc:.4f}")
 print("=" * 45)
-
 
 # =====================================================
 # 8. 绘制训练曲线
@@ -182,7 +172,6 @@ plt.savefig("imdb_gru_loss.png", dpi=300)
 plt.close()
 
 print("损失曲线图已保存为 imdb_gru_loss.png")
-
 
 # ---------- Accuracy 曲线 ----------
 plt.figure(figsize=(8, 4))
